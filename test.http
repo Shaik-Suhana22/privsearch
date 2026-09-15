@@ -1,0 +1,9 @@
+POST http://localhost:8080/documents
+Content-Type: application/json
+
+{
+  "filename": "Python Basics.txt",
+  "filetype": "TXT",
+  "filepath": "uploads/Python Basics.txt",
+  "content": "Python is a programming language. Python is easy to learn."
+}

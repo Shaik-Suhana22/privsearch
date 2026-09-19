@@ -8,39 +8,67 @@ import java.util.List;
 @Service
 public class SearchRankingService {
 
-    public List<Document> rankDocuments(String keyword, List<Document> documents) {
+    private final InvertedIndexService invertedIndexService;
 
-        // Clean and split the search query into individual words
+    private static final double K1 = 1.2;
+    private static final double B = 0.75;
+
+    private static final double FILENAME_BOOST = 2.0;
+
+    public SearchRankingService(
+            InvertedIndexService invertedIndexService) {
+
+        this.invertedIndexService = invertedIndexService;
+    }
+
+    public List<Document> rankDocuments(
+            String keyword,
+            List<Document> documents) {
+
+        if (keyword == null ||
+                keyword.isBlank() ||
+                documents.isEmpty()) {
+
+            return documents;
+        }
+
         String cleanedKeyword = keyword.toLowerCase()
-                .replaceAll("[^a-z0-9\\s]", "")
+                .replaceAll("[^a-z0-9\\s]", " ")
                 .trim();
 
         if (cleanedKeyword.isEmpty()) {
             return documents;
         }
 
-        String[] searchWords = cleanedKeyword.split("\\s+");
+        String[] searchWords =
+                cleanedKeyword.split("\\s+");
 
-        // Calculate the score for EVERY document
+        // Average document length across the ENTIRE corpus
+        double averageDocumentLength =
+                invertedIndexService.getAverageDocumentLength();
+
         for (Document document : documents) {
 
-            double contentScore = calculateScore(
-                    document.getContent(),
-                    searchWords,
-                    documents
-            );
+            double contentScore =
+                    calculateBM25Score(
+                            document,
+                            searchWords,
+                            averageDocumentLength
+                    );
 
-            double filenameScore = calculateFilenameScore(
-                    document.getFilename(),
-                    searchWords
-            );
+            double filenameScore =
+                    calculateFilenameScore(
+                            document.getFilename(),
+                            searchWords
+                    );
 
-            double finalScore = contentScore + filenameScore;
+            double finalScore =
+                    contentScore + filenameScore;
 
             document.setSearchScore(finalScore);
         }
 
-        // Sort highest score first
+        // Highest relevance first
         documents.sort((a, b) ->
                 Double.compare(
                         b.getSearchScore(),
@@ -51,74 +79,79 @@ public class SearchRankingService {
         return documents;
     }
 
-    private double calculateTF(String text, String word) {
-
-        if (text == null || text.isEmpty()) {
-            return 0;
-        }
-
-        String[] words = text.toLowerCase().split("\\W+");
-
-        int count = 0;
-
-        for (String currentWord : words) {
-
-            if (currentWord.equals(word)) {
-                count++;
-            }
-        }
-
-        return (double) count / words.length;
-    }
-
-    private double calculateIDF(String word, List<Document> documents) {
-
-        int documentsContainingWord = 0;
-
-        for (Document document : documents) {
-
-            if (document.getContent() != null &&
-                    document.getContent()
-                            .toLowerCase()
-                            .matches(".*\\b" + java.util.regex.Pattern.quote(word) + "\\b.*")) {
-
-                documentsContainingWord++;
-            }
-        }
-
-        if (documentsContainingWord == 0) {
-            return 0;
-        }
-
-        return Math.log(
-                (double) documents.size() / documentsContainingWord
-        );
-    }
-
-    private double calculateScore(
-            String text,
+    private double calculateBM25Score(
+            Document document,
             String[] searchWords,
-            List<Document> documents) {
+            double averageDocumentLength) {
+
+        Integer documentId =
+                document.getId();
+
+        int documentLength =
+                invertedIndexService.getDocumentLength(
+                        documentId
+                );
+
+        if (documentLength == 0) {
+            return 0;
+        }
 
         double totalScore = 0;
 
+        // Total number of documents in the whole corpus
+        int totalDocuments =
+                invertedIndexService.getTotalDocumentCount();
+
         for (String word : searchWords) {
 
-            double tf = calculateTF(text, word);
+            if (word.isBlank()) {
+                continue;
+            }
 
-            double idf = calculateIDF(
-                    word,
-                    documents
+            int termFrequency =
+                    invertedIndexService.getTermFrequency(
+                            word,
+                            documentId
+                    );
+
+            if (termFrequency == 0) {
+                continue;
+            }
+
+            int documentFrequency =
+                    invertedIndexService.getDocumentFrequency(
+                            word
+                    );
+
+            if (documentFrequency == 0) {
+                continue;
+            }
+
+            // BM25 inverse document frequency
+            double idf = Math.log(
+                    1.0 +
+                            (totalDocuments
+                                    - documentFrequency
+                                    + 0.5)
+                                    /
+                                    (documentFrequency + 0.5)
             );
 
-            if (tf > 0) {
+            double numerator =
+                    termFrequency * (K1 + 1);
 
-                // TF-IDF score
-                totalScore += tf * idf;
+            double denominator =
+                    termFrequency
+                            + K1 * (
+                            1 - B
+                                    + B * (
+                                    (double) documentLength
+                                            / averageDocumentLength
+                            )
+                    );
 
-                // Bonus for matching the search word
-                totalScore += 1.0;
-            }
+            totalScore +=
+                    idf * (numerator / denominator);
         }
 
         return totalScore;
@@ -128,26 +161,33 @@ public class SearchRankingService {
             String filename,
             String[] searchWords) {
 
-        if (filename == null || filename.isEmpty()) {
+        if (filename == null ||
+                filename.isBlank()) {
+
             return 0;
         }
 
-        String lowerFilename = filename.toLowerCase();
+        String normalizedFilename =
+                filename.toLowerCase()
+                        .replaceAll(
+                                "[^a-z0-9\\s]",
+                                " "
+                        )
+                        .trim();
 
         double score = 0;
 
         for (String word : searchWords) {
 
-            // Strong boost for exact filename match
-            if (lowerFilename.equals(word + ".txt")) {
+            if (normalizedFilename.equals(word)) {
 
-                score += 5.0;
+                // Exact filename match
+                score += FILENAME_BOOST * 2;
 
-            }
-            // Normal filename match
-            else if (lowerFilename.contains(word)) {
+            } else if (normalizedFilename.contains(word)) {
 
-                score += 2.0;
+                // Partial filename match
+                score += FILENAME_BOOST;
             }
         }
 

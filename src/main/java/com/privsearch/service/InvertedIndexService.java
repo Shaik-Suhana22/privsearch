@@ -145,9 +145,11 @@ public class InvertedIndexService {
                 word.toLowerCase()
                         .replaceAll("[^a-z0-9]", "");
 
-        return index.getOrDefault(
-                normalizedWord,
-                Set.of()
+        return new HashSet<>(
+                index.getOrDefault(
+                        normalizedWord,
+                        Set.of()
+                )
         );
     }
 

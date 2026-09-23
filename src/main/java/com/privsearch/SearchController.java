@@ -55,4 +55,10 @@ public class SearchController {
 
         return documentService.saveDocument(document);
     }
+    @org.springframework.web.bind.annotation.DeleteMapping("/documents/{id}")
+    public void deleteDocument(
+            @org.springframework.web.bind.annotation.PathVariable Integer id) {
+
+        documentService.deleteDocument(id);
+    }
 }

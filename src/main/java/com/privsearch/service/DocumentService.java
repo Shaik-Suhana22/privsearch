@@ -101,4 +101,18 @@ public class DocumentService {
 
         return savedDocument;
     }
+    public void deleteDocument(Integer id) {
+
+        if (id == null) {
+            return;
+        }
+
+        if (!documentRepository.existsById(id)) {
+            return;
+        }
+
+        documentRepository.deleteById(id);
+
+        invertedIndexService.removeDocument(id);
+    }
 }
